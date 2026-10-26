@@ -59,6 +59,9 @@ app.registerModule("server.mutation-results", {
 
   applyMutationAffected(affected = {}) {
     if (!affected || typeof affected !== "object") return false;
+    // Equipment usage is derived from tasks, including deletion and parent deletion.
+    // Invalidate in-flight reads so an older response cannot restore a stale card.
+    this.invalidateDeviceWarehouse?.();
     const changes = { taskStatus: [], sampleStatus: [], samplePerson: [] };
     this.mergeProjectSummaryRows(affected.projectSummaries || []);
     this.mergeSampleCategorySummaryRows(affected.sampleCategorySummaries || []);

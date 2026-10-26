@@ -9,20 +9,21 @@ from urllib.parse import quote, unquote
 
 KINDS = ("ct_model", "ct_video", "point_cloud")
 MAX_FILE_BYTES = 75 * 1024 * 1024
+POINT_CLOUD_EXTENSIONS = frozenset({".ply", ".pcd", ".xyz", ".pts", ".txt"})
 VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
                ".m4v": "video/mp4", ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
 
 
 def file_type(name, category):
     ext = Path(str(name)).suffix.lower()
-    if category == "pointcloud" and ext == ".ply":
+    if category == "pointcloud" and ext in POINT_CLOUD_EXTENSIONS:
         return "point_cloud", "application/octet-stream"
     if category == "ct":
         if ext == ".stl":
             return "ct_model", "application/octet-stream"
         if ext in VIDEO_TYPES:
             return "ct_video", VIDEO_TYPES[ext]
-    raise ValueError("点云仅支持 .ply；CT 支持 .stl、.mp4、.webm、.mov、.m4v、.avi、.mkv")
+    raise ValueError("点云支持 .ply、.pcd、.xyz、.pts、.txt；CT 支持 .stl、.mp4、.webm、.mov、.m4v、.avi、.mkv")
 
 
 def file_url(sample_id, asset_id):

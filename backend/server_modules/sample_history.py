@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import copy
+from datetime import datetime, timezone
 
 from server_modules import sample_assets, status_normalization, task_queries, problem_photos
 
@@ -11,6 +13,16 @@ def json_obj(text: str | None, fallback: object | None = None):
         return json.loads(text or "")
     except Exception:
         return fallback
+
+
+def history_sort_time(value: str) -> datetime:
+    """Compare instants across ISO offsets; undated history remains oldest."""
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        # Match SQLite julianday: date-only and zone-free values are UTC.
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def load_sample_photos(conn: sqlite3.Connection, sample_id: str) -> list[dict]:
@@ -91,13 +103,33 @@ def sample_task_result_photos(task: dict, sample_id: str, photos_by_id: dict[str
     return unique
 
 
+def history_device_references(record: dict | None) -> dict:
+    """Keep recorded identity, including a deliberate empty assignment."""
+    if not isinstance(record, dict) or not any(key in record for key in ("deviceIds", "deviceSnapshots")):
+        return {}
+    snapshots = record.get("deviceSnapshots") if isinstance(record.get("deviceSnapshots"), dict) else {}
+    ids = record.get("deviceIds") if isinstance(record.get("deviceIds"), list) else list(snapshots)
+    ids = list(dict.fromkeys(value for value in ids if isinstance(value, str) and value))
+    result = {"deviceIds": ids, "deviceSnapshots": {
+        device_id: copy.deepcopy(snapshots[device_id]) for device_id in ids
+        if isinstance(snapshots.get(device_id), dict)
+    }}
+    if record.get("deviceReferencesHistorical") is True:
+        result["deviceReferencesHistorical"] = True
+    return result
+
+
 def sample_history_row_for(sample_id: str, item: dict, photos_by_id: dict[str, dict]) -> dict:
     task = item.get("task") if isinstance(item.get("task"), dict) else None
     logs = item.get("logs") if isinstance(item.get("logs"), list) else []
     project_name = str(item.get("projectName") or "")
     stage_name = str(item.get("stageName") or "")
     test_item = str(item.get("testItem") or "")
+    device_source = next((log for log in reversed(logs)
+                          if isinstance(log, dict) and any(key in log for key in ("deviceIds", "deviceSnapshots"))), None)
     if task:
+        if any(key in task for key in ("deviceIds", "deviceSnapshots")):
+            device_source = task
         test_item = str(task.get("testItem") or test_item or "-")
         result = status_normalization.normalize_task_result_value(task.get("latestResult") or task.get("result")) or "-"
         date = str(task.get("resultDate") or task.get("completedAt") or task.get("planDate") or (logs[-1].get("time") if logs else "") or "-")
@@ -143,7 +175,10 @@ def sample_history_row_for(sample_id: str, item: dict, photos_by_id: dict[str, d
                       if type(log.get("sourceRevision")) is int else -1, default=None)
         result = "-"
         for log in reversed(logs):
-            result = status_normalization.normalize_task_result_value(log.get("result")) or str(log.get("result") or result or "-")
+            raw_result = log.get("result")
+            # Archive summaries use '-' when a task has no result yet. It is a
+            # display placeholder, not a mutation status to canonicalize.
+            result = "-" if raw_result == "-" and log.get("externalHistory") is True else status_normalization.normalize_task_result_value(raw_result) or str(raw_result or result or "-")
             if result and result != "-":
                 break
         date = str((logs[-1].get("time") if logs else "") or "-")
@@ -163,6 +198,8 @@ def sample_history_row_for(sample_id: str, item: dict, photos_by_id: dict[str, d
         ]
         status = next((str(log["taskStatus"]) for log in reversed(logs) if log.get("taskStatus")), "历史记录")
         if summary is not None:
+            if any(key in summary for key in ("deviceIds", "deviceSnapshots")):
+                device_source = summary
             # Archive summaries are display values and may use '-' for no result.
             # They are not task mutation payloads and must not be translated.
             result = str(summary.get("result") or "-")
@@ -174,6 +211,7 @@ def sample_history_row_for(sample_id: str, item: dict, photos_by_id: dict[str, d
     return {
         "key": str(item.get("key") or (task or {}).get("id") or ""),
         "task": task,
+        **history_device_references(device_source),
         "projectName": project_name or "-",
         "stageName": stage_name or "-",
         "testItem": test_item or "-",
@@ -239,7 +277,7 @@ def list_sample_history_page(conn: sqlite3.Connection, sample_id: str, query: di
         SELECT id, time, task_id, project_id, stage_id, test_item, data_json
         FROM sample_events
         WHERE sample_id = ?
-        ORDER BY time, id
+        ORDER BY julianday(time), id
         """,
         (sample_id,),
     ).fetchall()
@@ -311,7 +349,7 @@ def list_sample_history_page(conn: sqlite3.Connection, sample_id: str, query: di
 
     photos_by_id = {str(photo.get("id") or ""): photo for photo in load_sample_photos(conn, sample_id)}
     history_rows = [sample_history_row_for(sample_id, item, photos_by_id) for item in rows_by_key.values()]
-    history_rows.sort(key=lambda item: str(item.get("sortTime") or ""), reverse=True)
+    history_rows.sort(key=lambda item: history_sort_time(item.get("sortTime")), reverse=True)
     total = len(history_rows)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), total_pages)

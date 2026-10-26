@@ -14,3 +14,18 @@
 .sample-file-video { width:100%; }
 .sample-file-video[hidden] { display:none; }
 .sample-file-video video { display:block; width:100%; max-height:360px; background:#101820; border-radius:4px; }
+.sample-file-model { width:100%; min-width:0; }
+.sample-file-model[hidden] { display:none; }
+.sample-stl-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+.sample-stl-status { flex:1; min-width:160px; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.sample-stl-viewport { width:100%; height:360px; height:clamp(240px, 48vh, 480px); overflow:hidden; border:1px solid var(--border); border-radius:6px; background:#101820; }
+.sample-stl-viewport canvas { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+.sample-stl-viewport canvas:active { cursor:grabbing; }
+.sample-stl-viewport canvas:focus-visible { outline:2px solid var(--primary); outline-offset:-3px; }
+.sample-file-model .sample-files-hint { margin:8px 0 0; }
+
+.sample-files-format-help { margin:0 0 14px; font-size:12px; line-height:1.65; }
+.sample-files-format-help summary { cursor:pointer; color:var(--text); }
+.sample-files-format-help p { margin:6px 0 0; color:var(--text); }
+.sample-point-controls { display:flex; align-items:center; gap:6px; }
+.sample-point-size { min-width:32px; font-size:12px; text-align:center; white-space:nowrap; }

@@ -129,6 +129,12 @@ def _sample_destroy_scope_failure(
                 "expectedSampleIds": sorted(expected_ids),
                 "expectedStatus": expected_status,
             }
+        from server_modules import device_tasks
+        previous = task_mutation_rules.existing_task(conn, task_id) or {}
+        device_failure = device_tasks.prepare_task_devices(conn, task, previous,
+            "archive_task_delete" if executing else "set_task_plan", now=record_writers.now_iso())
+        if device_failure:
+            return device_failure
     return None
 
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from server_modules import chamber_package, import_diff, import_preview_cache, json_validation, migration_scope, status_normalization, zip_security
+from server_modules import chamber_package, import_diff, import_preview_cache, json_validation, migration_scope, status_normalization, zip_security, sample_history
 
 
 @dataclass(frozen=True)
@@ -142,6 +142,31 @@ def _sample_archive_history(ctx: BundlePreviewContext, sample_id: str) -> list[d
     return history
 
 
+def _mark_archive_device_references(record: dict, deployment_id: str) -> None:
+    """Sample archives carry equipment identity as history, never live ownership.
+
+    Preserve the first source across repeated archive hops. A destination may
+    have a different device with the same ID, so navigation must use snapshots.
+    """
+    for ids_key, snapshots_key in (("deviceIds", "deviceSnapshots"), ("previousDeviceIds", "previousDeviceSnapshots")):
+        if ids_key not in record and snapshots_key not in record:
+            continue
+        snapshots = record.get(snapshots_key) if isinstance(record.get(snapshots_key), dict) else {}
+        ids = record.get(ids_key) if isinstance(record.get(ids_key), list) else list(snapshots)
+        ids = list(dict.fromkeys(value for value in ids if isinstance(value, str) and value))
+        marked = {}
+        for device_id in ids:
+            snapshot = copy.deepcopy(snapshots[device_id]) if isinstance(snapshots.get(device_id), dict) else {"id": device_id}
+            snapshot["external"] = True
+            snapshot.setdefault("sourceDeviceId", snapshot.get("id") or device_id)
+            if not snapshot.get("sourceDeploymentId"):
+                snapshot["sourceDeploymentId"] = record.get("sourceDeploymentId") or deployment_id
+            marked[device_id] = snapshot
+        record[ids_key] = ids
+        record[snapshots_key] = marked
+        record["deviceReferencesHistorical"] = True
+
+
 def _external_history_events(sample_id: str, history: list[dict], *, deployment_id: str, exported_at: str, source_revision: int = 0) -> list[dict]:
     events: list[dict] = []
     for idx, row in enumerate(history, start=1):
@@ -153,7 +178,7 @@ def _external_history_events(sample_id: str, history: list[dict], *, deployment_
         key = str(row.get("key") or idx)
         event_id = f"external_history_{sample_id}_{chamber_package.sha256_bytes(key.encode('utf-8'))[:16]}"
         problems = row.get("problems") if isinstance(row.get("problems"), list) else []
-        events.append({
+        event = {
             "id": event_id,
             "sampleId": sample_id,
             "time": str(row.get("date") or exported_at),
@@ -175,7 +200,10 @@ def _external_history_events(sample_id: str, history: list[dict], *, deployment_
             "problemDescription": "；".join(str(item) for item in problems if str(item or "").strip()),
             "resultPhotos": row.get("resultPhotos") or [],
             "externalHistory": True,
-        })
+            **sample_history.history_device_references(row if any(key in row for key in ("deviceIds", "deviceSnapshots")) else task),
+        }
+        _mark_archive_device_references(event, deployment_id)
+        events.append(event)
     return events
 
 
@@ -312,6 +340,9 @@ def build_sample_archive_file(ctx: BundlePreviewContext, sample_id: str) -> tupl
     deployment_id = ctx.load_deployment_id()
     exported_at = ctx.now_iso()
     filtered = migration_scope.filter_state_by_selection(export_data, selection)
+    # A single-sample archive does not import a foreign equipment warehouse.
+    # All linked device identity is carried by immutable history snapshots.
+    filtered.pop("deviceWarehouse", None)
     sample_events = _external_history_events(sample_id, history, deployment_id=deployment_id, exported_at=exported_at, source_revision=_revision)
     existing_event_ids = {
         str(log.get("id") or "")
@@ -328,6 +359,15 @@ def build_sample_archive_file(ctx: BundlePreviewContext, sample_id: str) -> tupl
         log for log in (filtered.get("sampleLibrary") or {}).get("logs") or []
         if isinstance(log, dict) and str(log.get("sampleId") or "") == str(sample_id)
     ]
+    for event in events:
+        _mark_archive_device_references(event, deployment_id)
+    for row in history:
+        _mark_archive_device_references(row, deployment_id)
+        if isinstance(row.get("task"), dict):
+            _mark_archive_device_references(row["task"], deployment_id)
+        for log in row.get("logs") or []:
+            if isinstance(log, dict):
+                _mark_archive_device_references(log, deployment_id)
     # Reuse the standard export path by temporarily providing the filtered state
     # through a tiny context shim.
     def _filtered_state(*_args, **_kwargs):
@@ -382,6 +422,7 @@ def _target_archive_category(current_data: dict, target_category_id: str) -> dic
 
 def _prepare_sample_archive_import_state(incoming_state: dict, current_data: dict, target_category_id: str, *, source_deployment_id: str = "") -> dict:
     prepared = copy.deepcopy(incoming_state)
+    prepared.pop("deviceWarehouse", None)
     target = _target_archive_category(current_data, target_category_id)
     samples = []
     for category in (prepared.get("sampleLibrary") or {}).get("categories") or []:
@@ -417,6 +458,7 @@ def _prepare_sample_archive_import_state(incoming_state: dict, current_data: dic
             continue
         if not log.get("sourceDeploymentId"):
             log["sourceDeploymentId"] = source_deployment_id
+        _mark_archive_device_references(log, source_deployment_id)
         source_fields = {
             "projectId": "sourceProjectId",
             "stageId": "sourceStageId",

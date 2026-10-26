@@ -255,7 +255,7 @@ def load_sample_events(ctx: SampleLibraryContext, conn: sqlite3.Connection, samp
         SELECT data_json
         FROM sample_events
         WHERE sample_id = ?
-        ORDER BY time, id
+        ORDER BY julianday(time), id
         """,
         (sample_id,),
     ).fetchall()
@@ -332,7 +332,7 @@ def load_sample_library(ctx: SampleLibraryContext, conn: sqlite3.Connection, *, 
 
     logs = []
     if include_logs:
-        event_rows = conn.execute("SELECT data_json FROM sample_events ORDER BY time, id").fetchall()
+        event_rows = conn.execute("SELECT data_json FROM sample_events ORDER BY julianday(time), id").fetchall()
         for row in event_rows:
             log = ctx.json_obj(row["data_json"], None)
             if isinstance(log, dict):

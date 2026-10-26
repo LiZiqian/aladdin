@@ -9,7 +9,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Callable
 
-from server_modules import sample_files, chamber_package, import_commit, import_diff, import_preview_cache, migration_scope, mutation_summary as mutation_summary_module, record_writers, sample_assets, task_reservations
+from server_modules import sample_files, chamber_package, device_tasks, equipment_import, import_commit, import_diff, import_preview_cache, migration_scope, mutation_summary as mutation_summary_module, record_writers, sample_assets, task_reservations
 
 
 @dataclass(frozen=True)
@@ -153,6 +153,10 @@ def commit_merged_import_state(
                 "error": "导入样机的 SN/IMEI/主板SN 重复，请修改标识或合并到已有样机。",
                 "conflicts": identity_conflicts,
             }
+
+        equipment_failure = device_tasks.validate_state_device_assignments(merged_data)
+        if equipment_failure:
+            return False, equipment_failure
 
         new_revision = current_revision + 1
         updated_at = now_iso()
@@ -913,6 +917,8 @@ def _commit_import_bundle(ctx: ImportBundleCommitContext, payload: dict) -> dict
     )
     validation_errors = _validate_import_commit_state(current_data, touched_structure_project_ids)
     try:
+        equipment_import.merge_referenced_equipment(current_data, incoming, set(task_id_map.values()),
+            source_deployment_id=str(source_manifest.get("sourceDeploymentId") or ""), sample_ids=set(sample_id_map.values()))
         chamber_package.validate_state_structure(current_data)
     except ValueError as exc:
         validation_errors.append(str(exc))

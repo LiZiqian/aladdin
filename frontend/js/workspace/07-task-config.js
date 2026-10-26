@@ -46,6 +46,7 @@ app.registerModule("workspace.taskConfig", {
       planDate: seed.planDate || seed.planStartDate || "",
       status: seed.status || "待下发",
       sampleIds: [...(seed.sampleIds || [])],
+      deviceIds: [...(seed.deviceIds || [])],
       removedSampleRecords: [],
       sampleFaultRecords: [],
       resultUploads: [],
@@ -404,6 +405,7 @@ app.registerModule("workspace.taskConfig", {
     setTimeout(() => {
       if (modalId != null && this._currentModalId !== modalId) return;
       this.initTaskSamplePicker("tcSamplePick");
+      this.refreshTaskDevicePicker?.();
       if (initialTab === "sample") this.updateTaskSampleLimitUI("tcSampleProgress", "tcSamplePick", "tcSampleLimitHint");
     }, 0);
   },
@@ -411,6 +413,7 @@ app.registerModule("workspace.taskConfig", {
   taskConfigPanelHtml(project, stage, progress, task, activeTab) {
     const planActive = activeTab === "plan" ? "active" : "";
     const sampleActive = activeTab === "sample" ? "active" : "";
+    const deviceActive = activeTab === "device" ? "active" : "";
     return `<div class="task-config-shell">
       <div class="task-config-nav" role="tablist" aria-label="任务配置步骤">
         <button type="button" id="tcTabPlan" class="task-config-nav-card ${planActive}" role="tab" aria-controls="tcPanelPlan" aria-selected="${activeTab === "plan"}" tabindex="${activeTab === "plan" ? "0" : "-1"}" data-app-action="task-config-tab" data-value="plan">
@@ -419,6 +422,7 @@ app.registerModule("workspace.taskConfig", {
         <button type="button" id="tcTabSample" class="task-config-nav-card ${sampleActive}" role="tab" aria-controls="tcPanelSample" aria-selected="${activeTab === "sample"}" tabindex="${activeTab === "sample" ? "0" : "-1"}" data-app-action="task-config-tab" data-value="sample">
           <b>样机配置</b>
         </button>
+        <button type="button" id="tcTabDevice" class="task-config-nav-card ${deviceActive}" role="tab" aria-controls="tcPanelDevice" aria-selected="${activeTab === "device"}" tabindex="${activeTab === "device" ? "0" : "-1"}" data-app-action="task-config-tab" data-value="device"><b>测试设备配置</b></button>
       </div>
       <div class="task-config-main">
         <div class="task-config-panel ${planActive}" id="tcPanelPlan" role="tabpanel" aria-labelledby="tcTabPlan" aria-hidden="${activeTab !== "plan"}">
@@ -427,6 +431,7 @@ app.registerModule("workspace.taskConfig", {
         <div class="task-config-panel ${sampleActive}" id="tcPanelSample" role="tabpanel" aria-labelledby="tcTabSample" aria-hidden="${activeTab !== "sample"}">
           ${this.taskSampleConfigPanelHtml(project, stage, progress, task)}
         </div>
+        <div class="task-config-panel ${deviceActive}" id="tcPanelDevice" role="tabpanel" aria-labelledby="tcTabDevice" aria-hidden="${activeTab !== "device"}">${this.taskDeviceConfigPanelHtml?.(task) || ""}</div>
       </div>
     </div>`;
   },
@@ -507,6 +512,8 @@ app.registerModule("workspace.taskConfig", {
     const end = document.getElementById("tcPlanEndDate")?.value || "";
     // 读取 sample 字段
     const sampleIds = this.getSelectedTaskSampleIds("tcSamplePick");
+    const deviceIds = this.getSelectedTaskDeviceIds?.() || [...(t?.deviceIds || [])];
+    const deviceChanged = JSON.stringify([...(t?.deviceIds || [])].sort()) !== JSON.stringify([...deviceIds].sort());
     const check = this.validateTaskSampleSelection(progress, sampleIds, "样机分配");
     // 验证 plan
     this.clearFieldValidationMarks();
@@ -526,7 +533,7 @@ app.registerModule("workspace.taskConfig", {
       return true;
     }
     // 变更检测（合并 payload）
-    if (t && !this.isTaskChangePayloadChanged(t, { owner, planStartDate: start, planEndDate: end, sampleIds })) {
+    if (t && !deviceChanged && !this.isTaskChangePayloadChanged(t, { owner, planStartDate: start, planEndDate: end, sampleIds })) {
       Utils.toast("未检测到变更");
       return false;
     }
@@ -541,6 +548,8 @@ app.registerModule("workspace.taskConfig", {
     // ensure（task 已存在，仅防御）
     const wasNew = !t;
     t = t || this.ensurePlanTask(s, progress);
+    // The server validates reservations and creates authoritative snapshots/logs.
+    t.deviceIds = deviceIds;
     // 检测各维度变更
     const planChanged = (t.owner || "") !== owner
       || (t.planStartDate || t.planDate || "") !== start
@@ -589,9 +598,10 @@ app.registerModule("workspace.taskConfig", {
     if (!saved) {
       this.restoreFailedTaskMutation(mutationSnapshot, { render: false });
       this.loadTaskSamplePickerPage("tcSamplePick");
+      this.refreshTaskDevicePicker?.();
       return true;
     }
-    if (planChanged && sampleChanged) Utils.toast("任务配置已保存");
+    if (deviceChanged || (planChanged && sampleChanged)) Utils.toast("任务配置已保存");
     else if (planChanged) Utils.toast("计划配置已保存");
     else Utils.toast("样机配置已保存");
     return false;
@@ -629,6 +639,8 @@ app.registerModule("workspace.taskConfig", {
     const domSampleIds = this.getSelectedTaskSampleIds("tcSamplePick").sort().join(",");
     const origSampleIds = (t?.sampleIds || []).slice().sort().join(",");
     if (domSampleIds !== origSampleIds) return true;
+    const domDeviceIds = this.getSelectedTaskDeviceIds?.() || [...(t?.deviceIds || [])];
+    if (JSON.stringify([...domDeviceIds].sort()) !== JSON.stringify([...(t?.deviceIds || [])].sort())) return true;
     return false;
   },
 
@@ -643,13 +655,13 @@ app.registerModule("workspace.taskConfig", {
       el.setAttribute("aria-hidden", "true");
     });
     const navCards = document.querySelectorAll(".task-config-nav-card");
-    const activeNav = tab === "plan" ? navCards[0] : navCards[1];
+    const activeNav = navCards[tab === "plan" ? 0 : tab === "device" ? 2 : 1];
     if (activeNav) {
       activeNav.classList.add("active");
       activeNav.setAttribute("aria-selected", "true");
       activeNav.tabIndex = 0;
     }
-    const panel = document.getElementById(tab === "plan" ? "tcPanelPlan" : "tcPanelSample");
+    const panel = document.getElementById(tab === "plan" ? "tcPanelPlan" : tab === "device" ? "tcPanelDevice" : "tcPanelSample");
     if (panel) {
       panel.classList.add("active");
       panel.setAttribute("aria-hidden", "false");

@@ -43,7 +43,7 @@ app.registerModule("samples.detail", {
           <button type="button" data-sample-archive-tab="history" data-app-action="sample-archive-tab" data-tab="history">测试履历</button>
           <button type="button" data-sample-archive-tab="photos" data-app-action="sample-archive-tab" data-tab="photos">图片数据</button>
           <button type="button" data-sample-archive-tab="ct" data-app-action="sample-archive-tab" data-tab="ct">CT三维数据</button>
-          <button type="button" data-sample-archive-tab="pointcloud" data-app-action="sample-archive-tab" data-tab="pointcloud">D点云数据</button>
+          <button type="button" data-sample-archive-tab="pointcloud" data-app-action="sample-archive-tab" data-tab="pointcloud">点云数据</button>
           <button type="button" data-sample-archive-tab="other" data-app-action="sample-archive-tab" data-tab="other">其他</button>
         </aside>
         <div class="sample-archive-content">
@@ -219,7 +219,7 @@ app.registerModule("samples.detail", {
   applySampleArchiveReadonly() {
       const body = document.getElementById("modalBody");
       body?.querySelectorAll(".sample-archive-content input, .sample-archive-content select, .sample-archive-content textarea").forEach(el => { el.disabled = true; });
-      body?.querySelectorAll(".sample-archive-content button:not(.sample-history-photo):not(.sample-photo-thumb):not(.sample-history-summary):not(.sample-reassembly-link):not(.sample-history-page-btn):not(.problem-photo-link):not(.sample-file-control)").forEach(el => { el.disabled = true; });
+      body?.querySelectorAll(".sample-archive-content button:not(.sample-history-photo):not(.sample-photo-thumb):not(.sample-history-summary):not(.sample-reassembly-link):not(.sample-history-page-btn):not(.problem-photo-link):not(.sample-file-control):not(.device-reference-link)").forEach(el => { el.disabled = true; });
       body?.querySelectorAll('.sample-archive-content [data-app-action="sample-photo-upload"]').forEach(el => {
         el.removeAttribute("data-app-action");
         el.hidden = true;

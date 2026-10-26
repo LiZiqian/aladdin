@@ -5,6 +5,8 @@ import copy
 import json
 import re
 
+from server_modules import device_tasks, mutation_summary
+
 
 DEVICE_STATUSES = ("闲置", "使用中", "维护中", "停用")
 
@@ -36,6 +38,10 @@ def save_device(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
     fields["status"] = device.get("status", "闲置")
     if fields["status"] not in DEVICE_STATUSES:
         return False, {"status": 400, "error": "设备状态无效"}
+    if "hasFault" in device and type(device["hasFault"]) is not bool:
+        return False, {"status": 400, "error": "设备故障标记须为布尔值"}
+    if "faultNote" in device and (not isinstance(device["faultNote"], str) or len(device["faultNote"].strip()) > 2000):
+        return False, {"status": 400, "error": "故障说明须为不超过 2000 字符的文本"}
     expected = payload.get("expectedRevision")
     if type(expected) is not int or expected < 0:
         return False, {"status": 400, "error": "设备仓库版本号无效"}
@@ -44,7 +50,7 @@ def save_device(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
         if row is None:
             return False, {"status": 409, "error": "平台尚未初始化"}
         state = json.loads(row["data_json"])
-        warehouse = read_warehouse(conn)
+        warehouse = read_warehouse(conn, include_usage=False)
         if expected != warehouse.get("revision", 0):
             return False, {"status": 409, "error": "设备仓库已更新，请刷新列表后重试。"}
         group = next((item for item in warehouse["groups"] if item.get("id") == group_id), None)
@@ -60,6 +66,8 @@ def save_device(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
         devices = group.setdefault("devices", [])
         existing = next((item for item in devices if item.get("id") == device_id), None)
         now = ctx.now_iso()
+        fields["hasFault"] = device.get("hasFault", bool((existing or {}).get("hasFault", False)))
+        fields["faultNote"] = device.get("faultNote", str((existing or {}).get("faultNote") or "")).strip()
         saved = {**(existing or {}), "id": device_id, **fields, "updatedAt": now}
         if existing is None:
             saved["createdAt"] = now
@@ -71,22 +79,29 @@ def save_device(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
         state["deviceWarehouse"] = warehouse
         conn.execute("UPDATE app_state SET data_json = ?, revision = ?, updated_at = ? WHERE id = 1",
                      (ctx.json_dumps(state), int(row["revision"]) + 1, now))
+        blocked = device_tasks.block_faulted_device_tasks(conn, device_id, now=now, fault_note=fields["faultNote"]) if fields["hasFault"] else None
         conn.execute("""INSERT INTO audit_log
             (time, user, action, remark, revision_before, revision_after, client_ip)
             VALUES (?, '', ?, ?, ?, ?, ?)""",
             (now, "edit_device" if existing else "add_device", f'{fields["name"]}（{fields["code"]}）',
              int(row["revision"]), int(row["revision"]) + 1, client_ip))
-        return True, {"warehouse": warehouse, "previousRevision": int(row["revision"]),
-                      "revision": int(row["revision"]) + 1, "updated_at": now}
+        result = {"warehouse": device_tasks.decorate_warehouse(conn, warehouse), "previousRevision": int(row["revision"]),
+                  "revision": int(row["revision"]) + 1, "updated_at": now}
+        if blocked and blocked["taskIds"]:
+            result["affected"] = mutation_summary.build_mutation_affected_summary(conn,
+                task_ids=blocked["taskIds"], project_ids=blocked["projectIds"],
+                stage_ids=blocked["stageIds"], sample_ids=blocked["sampleIds"])
+        return True, result
 
 
-def read_warehouse(conn) -> dict:
+def read_warehouse(conn, *, include_usage=True) -> dict:
     row = conn.execute("SELECT data_json FROM app_state WHERE id = 1").fetchone()
     state = json.loads(row["data_json"]) if row else {}
     warehouse = state.get("deviceWarehouse") or {"revision": 0, "groups": []}
     if not isinstance(warehouse, dict) or not isinstance(warehouse.get("groups"), list):
         raise ValueError("设备仓库数据格式无效")
-    return copy.deepcopy(warehouse)
+    warehouse = copy.deepcopy(warehouse)
+    return device_tasks.decorate_warehouse(conn, warehouse) if include_usage else warehouse
 
 
 def save_group(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
@@ -110,7 +125,7 @@ def save_group(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
         if row is None:
             return False, {"status": 409, "error": "平台尚未初始化"}
         state = json.loads(row["data_json"])
-        warehouse = read_warehouse(conn)
+        warehouse = read_warehouse(conn, include_usage=False)
         groups = warehouse["groups"]
         revision = warehouse.get("revision", 0)
         if expected != revision:
@@ -137,5 +152,5 @@ def save_group(ctx, payload: dict, client_ip: str) -> tuple[bool, dict]:
             VALUES (?, '', ?, ?, ?, ?, ?)""",
             (now, "edit_device_group" if existing else "add_device_group",
              f'{fields["region"]}－{fields["department"]}', int(row["revision"]), int(row["revision"]) + 1, client_ip))
-        return True, {"warehouse": warehouse, "previousRevision": int(row["revision"]),
+        return True, {"warehouse": device_tasks.decorate_warehouse(conn, warehouse), "previousRevision": int(row["revision"]),
                       "revision": int(row["revision"]) + 1, "updated_at": now}

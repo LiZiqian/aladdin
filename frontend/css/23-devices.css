@@ -42,6 +42,20 @@
 .device-status.active { color: var(--task-blue-text); background: var(--task-blue-bg); border-color: var(--task-blue-border) }
 .device-status.maintenance { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border) }
 .device-status.inactive { color: var(--text); background: var(--surface); border-color: var(--border) }
+.device-status.reserved { color: var(--task-blue-text); background: var(--task-blue-bg); border-color: var(--task-blue-border) }
+.device-status.blocked, .device-status.fault { color: var(--danger-text); background: var(--danger-bg); border-color: var(--danger-border, var(--danger-text)) }
+.device-badges { display:flex; flex-wrap:wrap; gap:5px; align-items:center }
+.device-fault-toggle { display:flex; align-items:center; gap:8px; min-height:42px }
+.device-fault-toggle input { width:auto }
+.device-form-grid small { display:block; margin-top:7px; line-height:1.6; color:var(--muted) }
+.device-reference-notice { padding:12px; background:var(--surface); border-left:3px solid var(--primary); font-size:13px; line-height:1.6 }
+.device-fault-note { color:var(--danger-text); margin-top:16px; white-space:pre-wrap }
+.device-fault-note p { margin:6px 0 }
+.device-task-references { margin-top:20px }
+.device-task-references h3 { font-size:14px }
+.device-task-references ul { list-style:none; padding:0; margin:0 }
+.device-task-references li { display:grid; gap:5px; padding:10px 0; border-top:1px solid var(--border); font-size:13px }
+.device-task-references span { color:var(--muted) }
 .device-add-card { font-family: inherit }
 .device-add-card:disabled { opacity: .6; cursor: not-allowed }
 .device-detail-modal { max-width: 680px }

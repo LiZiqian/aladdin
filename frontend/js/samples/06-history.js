@@ -6,6 +6,7 @@
 app.registerModule("samples.history", {
 
   switchSampleArchiveTab(tab) {
+    this.disposeSample3dPreviews?.();
     const shell = document.querySelector(".sample-archive-shell");
     const sampleId = shell?.dataset.sampleDetailId || this._activeSampleDetailId;
     document.querySelectorAll("[data-sample-archive-tab]").forEach(btn => {
@@ -145,6 +146,7 @@ app.registerModule("samples.history", {
             <span>日期：<b>${Utils.esc(date)}</b></span>
             <span>样机数：<b>${taskSampleCount || "-"} 台</b></span>
           </div>
+          ${this.deviceReferencesHtml?.(Object.prototype.hasOwnProperty.call(row, "deviceIds") || Object.prototype.hasOwnProperty.call(row, "deviceSnapshots") ? row : task) || ""}
           ${problems.length ? `<div class="sample-history-problems">问题：${problems.map(x => Utils.esc(x)).join("；")}</div>` : ""}
           ${this.sampleHistoryPhotosHtml(sampleId, resultPhotos)}
           ${orderedLogs.length ? `<div class="sample-history-logs">${orderedLogs.map((log, logIdx) => this.logHtml(log, orderedLogs.length - logIdx, "日志 #", task)).join("")}</div>` : `<div class="path">暂无该任务下的样机状态记录。</div>`}

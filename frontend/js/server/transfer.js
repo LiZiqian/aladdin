@@ -15,6 +15,7 @@ app.registerModule("server.transfer", {
   },
 
   async applyImportBundleMutationResult(result = {}, { render = true } = {}) {
+    this.invalidateDeviceWarehouse?.();
     const mutationSummary = result.mutationSummary || null;
     this.serverRevision = Math.max(Number(this.serverRevision) || 0, Number(result.revision || result.newRevision) || 0);
     this.serverUpdatedAt = result.updated_at || result.updatedAt || new Date().toISOString();

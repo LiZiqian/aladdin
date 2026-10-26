@@ -370,6 +370,11 @@ app.registerModule("workspace.taskActions", {
         <div class="form-group"><label>计划开始</label><input type="date" id="tempPlanStart" data-app-action="task-sample-picker-schedule" data-app-events="change" data-id="tempSamplePick" value="${Utils.esc(t.planStartDate || t.planDate || "")}"></div>
         <div class="form-group"><label>计划完成</label><input type="date" id="tempPlanEnd" data-app-action="task-sample-picker-schedule" data-app-events="change" data-id="tempSamplePick" value="${Utils.esc(t.planEndDate || t.endDate || "")}"></div>
       </div>
+      <section class="temp-change-device-section">
+        <h3>测试设备变更</h3>
+        <p class="path">可替换或移除故障设备。阻塞中的任务在保存后仍保持阻塞，确认设备可用后再手动恢复测试。</p>
+        ${this.taskDeviceConfigPanelHtml?.(t) || ""}
+      </section>
       <div class="temp-change-sample-section">
         <input type="hidden" id="tempSampleProgress" value="${Utils.esc(progress?.id || t.progressId || "")}">
         <div class="form-group task-sample-config-group">
@@ -391,6 +396,7 @@ app.registerModule("workspace.taskActions", {
       const planStart = document.getElementById("tempPlanStart").value;
       const planEnd = document.getElementById("tempPlanEnd").value;
       const newSampleIds = this.getSelectedTaskSampleIds("tempSamplePick");
+      const newDeviceIds = this.getSelectedTaskDeviceIds?.() || [...(t.deviceIds || [])];
       this.clearFieldValidationMarks();
       const userCheck = this.validatePersonForScope(user, "tester", "任务变更人");
       if (!userCheck.ok) { this.markFieldInvalid(document.getElementById("tempUser"), userCheck.msg); return true; }
@@ -415,6 +421,7 @@ app.registerModule("workspace.taskActions", {
       const beforePlanStart = String(t.planStartDate || t.planDate || "").trim();
       const beforePlanEnd = String(t.planEndDate || t.endDate || "").trim();
       const beforeSampleIds = [...(t.sampleIds || [])];
+      const beforeDeviceIds = [...(t.deviceIds || [])];
       const beforeStatus = this.taskFlowStatus(t);
 
       const afterOwner = String(owner || "").trim();
@@ -428,8 +435,9 @@ app.registerModule("workspace.taskActions", {
       const removed = beforeSampleIds.filter(id => !afterSampleIds.includes(id));
       const added = afterSampleIds.filter(id => !beforeSampleIds.includes(id));
       const sampleChanged = removed.length > 0 || added.length > 0;
+      const deviceChanged = JSON.stringify(beforeDeviceIds.slice().sort()) !== JSON.stringify(newDeviceIds.slice().sort());
 
-      if (!ownerChanged && !planStartChanged && !planEndChanged && !sampleChanged) {
+      if (!ownerChanged && !planStartChanged && !planEndChanged && !sampleChanged && !deviceChanged) {
         Utils.toast("未检测到变更");
         return false;
       }
@@ -448,6 +456,7 @@ app.registerModule("workspace.taskActions", {
       t.planEndDate = afterPlanEnd;
       t.planDate = afterPlanStart || t.planDate || "";
       t.sampleIds = afterSampleIds;
+      t.deviceIds = newDeviceIds;
 
       // 只有样机变了才记录退出/新增和更新样机状态
       if (sampleChanged) {
@@ -501,14 +510,15 @@ app.registerModule("workspace.taskActions", {
         const inn = addedNames[i] || "-";
         detailParts.push(`样机变更：${out} → ${inn}`);
       }
-      this.addTaskLog(t, "临时变更", {
-        user,
-        reason: changeReason,
-        fromStatus: beforeStatus,
-        toStatus: afterStatus,
-        detail: detailParts.join("；"),
-        detailLines: detailParts
-      });
+      // Equipment assignment logs and snapshots are authored by the server.
+      if (detailParts.length) this.addTaskLog(t, "临时变更", {
+          user,
+          reason: changeReason,
+          fromStatus: beforeStatus,
+          toStatus: afterStatus,
+          detail: detailParts.join("；"),
+          detailLines: detailParts
+        });
 
       const saved = await this.commitTaskMutation(p, s, t, {
         action: "temp_change_task",
@@ -518,6 +528,7 @@ app.registerModule("workspace.taskActions", {
       });
       if (!saved) {
         this.restoreFailedTaskActionMutation(mutationSnapshot, { render: false });
+        this.refreshTaskDevicePicker?.();
         return true;
       }
       return false;
@@ -526,6 +537,7 @@ app.registerModule("workspace.taskActions", {
       if (modalId != null && this._currentModalId !== modalId) return;
       this.initTaskSamplePicker("tempSamplePick");
       this.updateTaskSampleLimitUI("tempSampleProgress", "tempSamplePick", "tempSampleLimitHint");
+      this.refreshTaskDevicePicker?.();
     }, 0);
   },
 

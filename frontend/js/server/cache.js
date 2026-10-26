@@ -19,14 +19,17 @@ app.registerModule("server.cache", {
       found.sample.updatedAt = json.updated_at || json.updatedAt || Utils.now();
     }
 
-    if (found?.category?.id) this.invalidatePagedCaches({ categoryId: found.category.id });
-    this.invalidateSampleHistoryCache(sampleId);
+    // Acknowledge asset fields before history invalidation adds its metadata.
+    // Keep insertion order aligned with the live sample: the dirty-state guard
+    // compares JSON snapshots, including fields first populated by an upload.
     if (found?.sample) this.syncHydratedSamplePatchBaseline(sampleId, {
       photos: found.sample.photos,
       photoCount: found.sample.photoCount,
       photosLoaded: found.sample.photosLoaded,
       updatedAt: found.sample.updatedAt,
     });
+    if (found?.category?.id) this.invalidatePagedCaches({ categoryId: found.category.id });
+    this.invalidateSampleHistoryCache(sampleId);
 
     if (renderPanel) this.refreshSampleArchivePanels?.(sampleId);
 

@@ -249,6 +249,12 @@ const app = {
       case "device-open":
         this.openDevice(id);
         break;
+      case "device-reference": {
+        let snapshot = null;
+        try { snapshot = JSON.parse(target.dataset.deviceSnapshot || "null"); } catch (_) { /* ID lookup remains available. */ }
+        this.openDeviceReference(target.dataset.deviceId || id, snapshot);
+        break;
+      }
       case "project-edit":
         this.editProject(id);
         break;
@@ -393,6 +399,15 @@ const app = {
       case "task-config-tab":
         this.switchTaskConfigTab(value || target.dataset.tab || "plan");
         break;
+      case "task-device-refresh":
+        this.refreshTaskDevicePicker();
+        break;
+      case "task-device-filter":
+        this.filterTaskDevicePicker(target);
+        break;
+      case "task-device-select":
+        this.selectTaskDevice(target);
+        break;
       case "task-sample-picker-schedule":
         this.loadTaskSamplePickerPage(id);
         break;
@@ -516,6 +531,10 @@ const app = {
       case "sample-file-upload":
       case "sample-file-delete":
       case "sample-file-preview":
+      case "sample-file-model-preview":
+      case "sample-file-model-reset":
+      case "sample-file-point-smaller":
+      case "sample-file-point-larger":
       case "sample-file-reload":
         this.handleSampleFileAction(target, action.replace("sample-file-", ""));
         break;

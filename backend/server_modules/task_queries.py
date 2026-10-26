@@ -300,6 +300,12 @@ def attach_task_sample_snapshots(conn: sqlite3.Connection, tasks: list[dict]) ->
             fresh = snapshots.get(sample_id)
             if fresh:
                 merged = {**existing, **fresh}
+                # Import rewrites storage timestamps even when sample identity
+                # is unchanged. Keep the recorded snapshot time in that case,
+                # so reading it cannot create a spurious V2 re-import conflict.
+                if existing.get("updatedAt") and all(
+                        existing.get(key) == value for key, value in fresh.items() if key != "updatedAt"):
+                    merged["updatedAt"] = existing["updatedAt"]
                 if existing.get("destroyedAt"):
                     merged["destroyedAt"] = existing.get("destroyedAt")
                 current[sample_id] = merged
@@ -317,7 +323,7 @@ def load_task_logs_for(conn: sqlite3.Connection, task_ids: list[str]) -> dict[st
         SELECT task_id, data_json
         FROM task_logs
         WHERE task_id IN ({placeholders})
-        ORDER BY time, id
+        ORDER BY julianday(time), id
         """,
         task_ids,
     ).fetchall()

@@ -12,6 +12,33 @@ app.registerModule("app.logs", {
     button.setAttribute("aria-expanded", String(expanded));
   },
 
+  deviceReferencesHtml(record, { previous = false, label = "关联设备" } = {}) {
+    if (!record || typeof record !== "object") return "";
+    const idsKey = previous ? "previousDeviceIds" : "deviceIds";
+    const snapshotsKey = previous ? "previousDeviceSnapshots" : "deviceSnapshots";
+    const snapshots = record[snapshotsKey] && typeof record[snapshotsKey] === "object" && !Array.isArray(record[snapshotsKey])
+      ? record[snapshotsKey] : {};
+    // An explicit empty assignment is different from an older log that never
+    // recorded devices. Never borrow today's task equipment for a past event.
+    if (!Array.isArray(record[idsKey]) && !Object.keys(snapshots).length) return "";
+    const ids = [...new Set((Array.isArray(record[idsKey]) ? record[idsKey] : Object.keys(snapshots))
+      .filter(id => typeof id === "string" && id.trim()).map(id => id.trim()))];
+    const links = ids.map(id => {
+      const raw = Object.prototype.hasOwnProperty.call(snapshots, id) ? snapshots[id] : null;
+      const snapshot = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw, id: raw.id || id } : { id };
+      if (record.deviceReferencesHistorical === true) snapshot.external = true;
+      const name = String(snapshot.name || snapshot.code || id);
+      const code = snapshot.code && snapshot.code !== name ? ` · ${snapshot.code}` : "";
+      const context = [snapshot.region, snapshot.department, snapshot.model].filter(Boolean).join(" · ");
+      return `<button type="button" class="device-reference-link" data-app-action="device-reference" data-stop-propagation="1" data-device-id="${Utils.esc(id)}" data-device-snapshot="${Utils.esc(JSON.stringify(snapshot))}" title="${Utils.esc(context || name)}">${Utils.esc(name + code)}${snapshot.external === true ? '<span class="device-reference-source">（历史快照）</span>' : ""}</button>`;
+    }).join('<span class="device-reference-separator">、</span>');
+    return `<div class="device-reference-row"><span class="device-reference-label">${Utils.esc(label)}：</span><span class="device-reference-values">${links || '<span class="path">未关联设备</span>'}</span></div>`;
+  },
+
+  taskLogDevicesHtml(log) {
+    return this.deviceReferencesHtml(log, { previous: true, label: "变更前设备" }) + this.deviceReferencesHtml(log);
+  },
+
   logHtml(l, seq = "", seqPrefix = "", task = null) {
     const seqHtml = seq ? `<span class="log-seq">${Utils.esc(seqPrefix)}${Utils.esc(seq)}</span>` : "";
     const reasonText = String(l.reason || l.problemDescription || "").trim();
@@ -21,7 +48,7 @@ app.registerModule("app.logs", {
     const actionTitle = l.action || l.source || "-";
     return `<div class="log-line">${seqHtml}<b>${Utils.esc(actionTitle)}</b>
       <div class="task-log-meta">${Utils.esc(new Date(l.time).toLocaleString("zh-CN"))} | 操作人：${Utils.esc(l.user || "-")} | 状态：${Utils.esc(l.from || "-")} → ${Utils.esc(l.to || "-")} | 测试项：${Utils.esc(l.testItem || "-")}</div>
-      ${content}</div>`;
+      ${content}${this.taskLogDevicesHtml(l)}</div>`;
   },
 
   // ---- 任务日志 ----
@@ -346,6 +373,13 @@ app.registerModule("app.logs", {
       content.className = "task-log-content";
       content.append(contentNode);
       item.append(content);
+    }
+    const deviceHtml = this.taskLogDevicesHtml(log);
+    if (deviceHtml) {
+      const devices = document.createElement("div");
+      devices.className = "task-log-devices";
+      this.replaceHtml(devices, deviceHtml);
+      item.append(devices);
     }
     return item;
   },

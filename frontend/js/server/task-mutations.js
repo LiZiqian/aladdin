@@ -72,6 +72,22 @@ app.registerModule("server.task-mutations", {
     }).join("\n");
   },
 
+  handleTaskDeviceMutationFailure(json = {}) {
+    if (!["TASK_DEVICE_IDS_INVALID", "TASK_DEVICE_ASSIGNMENT_NOT_ALLOWED", "DEVICE_NOT_AVAILABLE", "DEVICE_OCCUPANCY_CONFLICT"].includes(json.error_code)) return false;
+    this._lastTaskMutationError = json;
+    this.invalidateDeviceWarehouse?.();
+    const details = (json.devices || json.conflicts || []).slice(0, 8).map(item => {
+      const name = item.device?.name || item.deviceId || "设备";
+      const code = item.device?.code ? `（${item.device.code}）` : "";
+      const task = item.testItem ? ` · ${item.testItem}` : "";
+      const dates = item.planStartDate || item.planEndDate ? `（${item.planStartDate || "未设置"} ~ ${item.planEndDate || "未设置"}）` : "";
+      return `· ${name}${code}${task}${dates}：${item.reason || "不可用"}`;
+    }).join("\n");
+    this.updateServerStatus("设备配置未保存");
+    alert(`${json.error || "设备当前不可用于此任务"}${details ? "\n\n" + details : ""}`);
+    return true;
+  },
+
   async commitTaskMutation(project, stage, task, { action = "task_mutation", remark = "任务增量变更", user = "", render = true, createIfMissing = false, deleteMode = "", sampleIdsForMutation = null } = {}) {
     if (!project || !stage || !task) return false;
     this._lastTaskMutationError = null;
@@ -109,6 +125,7 @@ app.registerModule("server.task-mutations", {
         body: JSON.stringify(payload),
       });
       const json = await resp.json().catch(() => ({ ok: false, error: "服务器返回不是 JSON" }));
+      if (!json.ok && this.handleTaskDeviceMutationFailure(json)) return false;
       if (resp.status === 409 && json.error_code === "SAMPLE_OCCUPANCY_CONFLICT") {
         this._lastTaskMutationError = json;
         const detail = (json.conflicts || []).slice(0, 5).map(c => {
@@ -200,6 +217,7 @@ app.registerModule("server.task-mutations", {
         body: JSON.stringify(payload),
       });
       const json = await resp.json().catch(() => ({ ok: false, error: "服务器返回不是 JSON" }));
+      if (!json.ok && this.handleTaskDeviceMutationFailure(json)) return false;
       if (resp.status === 409 && json.error_code === "TASK_REVISION_CONFLICT") {
         this._lastTaskMutationError = json;
         alert("批量任务未保存：平台数据已被其他页面更新。将读取最新数据，请核对后重新操作。");

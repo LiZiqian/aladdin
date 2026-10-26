@@ -101,6 +101,7 @@ app.registerModule("app.modal", {
     this._dialogRequestSequence = (this._dialogRequestSequence || 0) + 1;
     const modalMask = document.getElementById("modalMask");
     const modalWasOpen = modalMask?.style.display === "flex";
+    this.disposeSample3dPreviews?.();
     if (!this._restoringModal && !modalWasOpen) this._modalReturnFocus = document.activeElement;
     // 模态框堆栈：当前已显示时，保存当前状态
     if (!this._restoringModal && modalWasOpen) {
@@ -363,6 +364,7 @@ app.registerModule("app.modal", {
   closeModal(expectedModalId = null) {
     if (expectedModalId && this._currentModalId !== expectedModalId) return false;
     if (!expectedModalId && this._modalBusy) return false;
+    this.disposeSample3dPreviews?.();
     if (this._currentModalId) this.setModalBusy(this._currentModalId, false);
     // 模态框堆栈：有上一级则恢复
     if (this._modalStack.length > 0) {
@@ -451,7 +453,7 @@ app.registerModule("app.modal", {
     const panel = el?.closest?.(".task-config-panel");
     if (!panel || panel.classList.contains("active")) return;
     document.querySelectorAll(".task-config-panel").forEach(item => item.classList.toggle("active", item === panel));
-    const value = panel.id === "tcPanelSample" ? "sample" : panel.id === "tcPanelPlan" ? "plan" : "";
+    const value = ({ tcPanelSample: "sample", tcPanelPlan: "plan", tcPanelDevice: "device" })[panel.id] || "";
     if (!value) return;
     document.querySelectorAll(".task-config-nav-card").forEach(item => {
       item.classList.toggle("active", item.dataset.value === value);

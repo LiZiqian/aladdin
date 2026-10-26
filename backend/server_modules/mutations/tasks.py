@@ -27,6 +27,7 @@ from .task_guards import (
 )
 
 from server_modules import (
+    device_tasks,
     mutation_summary,
     record_writers,
     status_normalization,
@@ -161,6 +162,11 @@ def commit_task_mutation(ctx: MutationServiceContext, payload: dict, client_ip: 
                 **state_conflict,
                 "server_revision": current_revision,
             }
+        current_task = task_mutation_rules.existing_task(conn, task_id) or {}
+        device_failure = device_tasks.prepare_task_devices(conn, task, current_task, action,
+            now=ctx.now_iso(), user=str(payload.get("user") or ""), is_delete=is_delete)
+        if device_failure:
+            return False, {**device_failure, "server_revision": current_revision}
         if not is_delete:
             status_blockers = task_mutation_rules.detect_task_mutation_sample_status_blockers(
                 conn, [(task_id, task)], check_all=action in ("start_task", "restart_task"))
@@ -221,6 +227,7 @@ def commit_task_mutation(ctx: MutationServiceContext, payload: dict, client_ip: 
         sample_write_payloads = _operational_sample_write_payloads(conn, sample_payloads, preserve_sample_state=reservation_only)
         for sample in sample_write_payloads:
             record_writers.update_sample_record(conn, sample)
+        device_tasks.enrich_sample_events(conn, sample_events, task)
         record_writers.upsert_sample_events(conn, sample_events)
         if is_delete:
             record_writers.delete_task_record(conn, task_id)
@@ -284,6 +291,9 @@ def commit_task_batch_mutation(ctx: MutationServiceContext, payload: dict, clien
         sample_ids_failure = task_mutation_rules.task_sample_ids_failure(task)
         if sample_ids_failure:
             return False, sample_ids_failure
+        device_ids_failure = device_tasks.device_ids_failure(task.get("deviceIds", []))
+        if device_ids_failure:
+            return False, device_ids_failure
         task_id = str(task.get("id") or "")
         if not task_id:
             return False, {"status": 400, "error": "任务缺少 id"}
@@ -386,6 +396,12 @@ def commit_task_batch_mutation(ctx: MutationServiceContext, payload: dict, clien
                 "samples": status_blockers,
                 "server_revision": current_revision,
             }
+
+        for task in normalized_tasks:
+            device_failure = device_tasks.prepare_task_devices(conn, task, {}, action,
+                now=ctx.now_iso(), user=str(payload.get("user") or ""), proposed_tasks=normalized_tasks)
+            if device_failure:
+                return False, {**device_failure, "server_revision": current_revision}
 
         for task in normalized_tasks:
             record_writers.upsert_task_record(
