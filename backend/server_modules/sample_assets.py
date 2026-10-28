@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 import re
 import sqlite3
 import sys
@@ -167,14 +168,16 @@ def write_sample_asset_file(
     ctx: AssetStorageContext,
     sample_id: str,
     asset_id: str,
-    content: bytes,
+    content: bytes | Path,
     original_name: str,
     mime_type: str,
     *,
     uploaded_at: str | None = None,
     file_prefix: str = "photo",
 ) -> dict:
+    """Write bytes or atomically publish a staged attachment on the data volume."""
     _require_file_transaction_owner()
+    size = content.stat().st_size if isinstance(content, Path) else len(content)
     ext = file_ext(original_name, mime_type)
     file_name = f"{safe_segment(asset_id, file_prefix)}{ext}"
     target_dir = ctx.sample_data_dir / safe_segment(sample_id, "sample") / ("files" if file_prefix == "file" else "photos")
@@ -184,7 +187,13 @@ def write_sample_asset_file(
         try:
             with target.open("xb") as stream:
                 try:
-                    stream.write(content)
+                    if isinstance(content, Path):
+                        # Reserve the destination without overwriting any existing
+                        # asset, then move the validated upload on the same volume.
+                        stream.close()
+                        os.replace(content, target)
+                    else:
+                        stream.write(content)
                 except BaseException:
                     stream.close()
                     target.unlink(missing_ok=True)
@@ -199,7 +208,7 @@ def write_sample_asset_file(
         "id": asset_id,
         "name": original_name or file_name,
         "type": mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream",
-        "size": len(content),
+        "size": size,
         "url": url_for_asset(sample_id, asset_id),
         "relativePath": relative_path,
         "uploadedAt": created_at,

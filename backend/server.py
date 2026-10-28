@@ -185,7 +185,7 @@ def store_asset_bytes(
 def write_sample_asset_file(
     sample_id: str,
     asset_id: str,
-    content: bytes,
+    content: bytes | Path,
     original_name: str,
     mime_type: str,
     *,

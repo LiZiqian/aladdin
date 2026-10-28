@@ -533,6 +533,7 @@ const app = {
       case "sample-file-preview":
       case "sample-file-model-preview":
       case "sample-file-model-reset":
+      case "sample-file-model-quality":
       case "sample-file-point-smaller":
       case "sample-file-point-larger":
       case "sample-file-reload":

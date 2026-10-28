@@ -81,7 +81,7 @@ app.registerModule("app.render", {
     const title = document.createElement("p");
     title.className = "home-title";
     title.append(document.createTextNode("终端硬件测试数字治理平台 "));
-    title.append(this.textEl("span", "V7", "home-version"));
+    title.append(this.textEl("span", `V${this.version}`, "home-version"));
     brand.append(logoHeading);
 
     const grid = document.createElement("div");

@@ -7,11 +7,53 @@ from contextlib import closing
 from pathlib import Path
 from urllib.parse import quote, unquote
 
+from server_modules.http_multipart_stream import staged_multipart
+
 KINDS = ("ct_model", "ct_video", "point_cloud")
-MAX_FILE_BYTES = 75 * 1024 * 1024
+MAX_FILE_BYTES = 1024 * 1024 * 1024
+MAX_POINT_CLOUD_BYTES = 75 * 1024 * 1024
+MAX_REQUEST_BYTES = MAX_FILE_BYTES + 1024 * 1024
 POINT_CLOUD_EXTENSIONS = frozenset({".ply", ".pcd", ".xyz", ".pts", ".txt"})
 VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
                ".m4v": "video/mp4", ".avi": "video/x-msvideo", ".mkv": "video/x-matroska"}
+
+
+def upload_file_limit(filename):
+    if Path(filename).suffix.lower() in POINT_CLOUD_EXTENSIONS:
+        return MAX_POINT_CLOUD_BYTES, "每个点云文件不能超过 75 MB"
+    return MAX_FILE_BYTES, "每个 CT 文件不能超过 1 GB"
+
+
+def upload_files(handler, ctx, sample_id):
+    # Reject missing samples before accepting a potentially gigabyte-sized body.
+    with closing(ctx.connect_db()) as conn:
+        if not conn.execute("SELECT 1 FROM sample_records WHERE id = ? AND deleted_at IS NULL", (sample_id,)).fetchone():
+            raise KeyError("样机不存在")
+    previous_timeout = handler.connection.gettimeout()
+    try:
+        # This is an idle timeout per read, not a total upload-duration limit.
+        handler.connection.settimeout(120)
+        with staged_multipart(handler.headers, handler.rfile, data_dir=ctx.DATA_DIR,
+                              max_request_bytes=MAX_REQUEST_BYTES, file_limit=upload_file_limit) as (fields, uploads):
+            if not uploads:
+                raise ValueError("请选择文件")
+            checked = [(item, *file_type(item["filename"], fields.get("category"))) for item in uploads]
+            if any(not item["size"] for item, _, _ in checked):
+                raise ValueError("不能上传空文件")
+            with ctx.write_db_connection() as conn:
+                if not conn.execute("SELECT 1 FROM sample_records WHERE id = ? AND deleted_at IS NULL", (sample_id,)).fetchone():
+                    raise KeyError("样机不存在")
+                for item, kind, mime in checked:
+                    meta = ctx.write_sample_asset_file(sample_id, f"file_{uuid.uuid4().hex}", item["path"],
+                                                       item["filename"], mime, file_prefix="file")
+                    ctx.upsert_sample_asset_meta(conn, sample_id, meta, kind, uploaded_by=handler.client_address[0])
+                files = load_files(conn, sample_id)
+                result = ctx.commit_sample_asset_mutation(conn, sample_id, "upload_sample_files", "添加样机 CT / 点云文件", handler.client_address[0])
+            return {"ok": True, **result, "files": files}
+    except TimeoutError as error:
+        raise ValueError("上传连接长时间没有数据，请重新上传") from error
+    finally:
+        handler.connection.settimeout(previous_timeout)
 
 
 def file_type(name, category):
@@ -124,25 +166,13 @@ def handle(handler, ctx, method, path, query=None):
                 raise KeyError("文件不存在")
             send_file(handler, target, meta, download=(query or {}).get("download") == ["1"])
         elif method == "POST" and file_id is None:
-            fields, uploads = ctx.parse_multipart(handler.headers, handler._read_body())
-            uploads = [item for item in uploads if item["field"] == "files"]
-            if not uploads:
-                raise ValueError("请选择文件")
-            checked = [(item, *file_type(item["filename"], fields.get("category"))) for item in uploads]
-            if any(not item["content"] for item, _, _ in checked):
-                raise ValueError("不能上传空文件")
-            if any(len(item["content"]) > MAX_FILE_BYTES for item, _, _ in checked):
-                raise ValueError("每个文件不能超过 75 MB")
-            with ctx.write_db_connection() as conn:
-                if not conn.execute("SELECT 1 FROM sample_records WHERE id = ? AND deleted_at IS NULL", (sample_id,)).fetchone():
-                    raise KeyError("样机不存在")
-                for item, kind, mime in checked:
-                    meta = ctx.write_sample_asset_file(sample_id, f"file_{uuid.uuid4().hex}", item["content"],
-                                                       item["filename"], mime, file_prefix="file")
-                    ctx.upsert_sample_asset_meta(conn, sample_id, meta, kind, uploaded_by=handler.client_address[0])
-                files = load_files(conn, sample_id)
-                result = ctx.commit_sample_asset_mutation(conn, sample_id, "upload_sample_files", "添加样机 CT / 点云文件", handler.client_address[0])
-            handler._send_json({"ok": True, **result, "files": files})
+            try:
+                result = upload_files(handler, ctx, sample_id)
+            except BaseException:
+                # Rejected/interrupted uploads may leave unread socket bytes.
+                handler.close_connection = True
+                raise
+            handler._send_json(result)
         elif method == "DELETE" and file_id:
             with ctx.write_db_connection() as conn:
                 meta = conn.execute("SELECT relative_path FROM sample_assets WHERE sample_id = ? AND id = ? "

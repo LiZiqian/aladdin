@@ -29,3 +29,6 @@
 .sample-files-format-help p { margin:6px 0 0; color:var(--text); }
 .sample-point-controls { display:flex; align-items:center; gap:6px; }
 .sample-point-size { min-width:32px; font-size:12px; text-align:center; white-space:nowrap; }
+.sample-stl-quality { display:flex; align-items:center; gap:4px; font-size:12px; flex-wrap:wrap; }
+.sample-stl-quality > span { margin-right:4px; }
+.sample-stl-quality [aria-pressed="true"] { color:var(--primary); border-color:var(--primary); background:var(--bg); font-weight:600; }
